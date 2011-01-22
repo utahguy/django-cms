@@ -1,24 +1,32 @@
 # Django settings for cms project.
+try:
+    from djangoappengine.settings_base import *
+    has_djangoappengine = True
+except ImportError:
+    has_djangoappengine = False
+    DEBUG = True
+    TEMPLATE_DEBUG = DEBUG
 import os
+
 PROJECT_DIR = os.path.dirname(__file__)
 
-DEBUG = True
-TEMPLATE_DEBUG = DEBUG
+##DEBUG = True
+##TEMPLATE_DEBUG = DEBUG
 
 ADMINS = (
 )
-
+AUTHENTICATION_BACKENDS=['permission_backend_nonrel.backends.NonrelPermissionBackend', 'django.contrib.auth.backends.ModelBackend']
 CACHE_BACKEND = 'locmem:///'
 
 MANAGERS = ADMINS
 
-DATABASE_ENGINE = 'sqlite3'
-DATABASE_NAME = 'cms.sqlite'
+##DATABASE_ENGINE = 'sqlite3'
+##DATABASE_NAME = 'cms.sqlite'
 
-TEST_DATABASE_CHARSET = "utf8"
-TEST_DATABASE_COLLATION = "utf8_general_ci"
-
-DATABASE_SUPPORTS_TRANSACTIONS = True
+##TEST_DATABASE_CHARSET = "utf8"
+##TEST_DATABASE_COLLATION = "utf8_general_ci"
+##
+##DATABASE_SUPPORTS_TRANSACTIONS = True
 
 TIME_ZONE = 'America/Chicago'
 
@@ -57,15 +65,17 @@ INTERNAL_IPS = ('127.0.0.1',)
 
 MIDDLEWARE_CLASSES = (
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'cms.middleware.multilingual.MultilingualURLMiddleware',
+##    'cms.middleware.multilingual.MultilingualURLMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.doc.XViewMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'cms.middleware.media.PlaceholderMediaMiddleware', 
-    'cms.middleware.user.CurrentUserMiddleware',
-    'cms.middleware.page.CurrentPageMiddleware',
-    'cms.middleware.toolbar.ToolbarMiddleware',
+##    'cms.middleware.media.PlaceholderMediaMiddleware', 
+##    'cms.middleware.user.CurrentUserMiddleware',
+##    'cms.middleware.page.CurrentPageMiddleware',
+##    'cms.middleware.toolbar.ToolbarMiddleware',
+##    'middleware.AddUserToRequestMiddleware',
+
 )
 
 DEBUG_TOOLBAR_CONFIG = {
@@ -86,8 +96,8 @@ INSTALLED_APPS = (
     'django.contrib.admin',
     'django.contrib.sites',
     'cms',
-    'publisher',
-    'menus',
+##    'publisher',
+##    'menus',
     'cms.plugins.text',
     'cms.plugins.picture',
     'cms.plugins.file',
@@ -100,10 +110,19 @@ INSTALLED_APPS = (
     'cms.plugins.twitter',
     'cms.plugins.inherit',
     'mptt',
-    'example.sampleapp',
-    'south'
+##    'example.sampleapp',
+##    'south',
+    'djangotoolbox',
+##    'permission_backend_nonrel'
 )
+if has_djangoappengine:
+    # djangoappengine should come last, so it can override a few manage.py commands
+    INSTALLED_APPS += ('djangoappengine',)
 
+
+
+  
+    
 gettext = lambda s: s
 
 LANGUAGE_CODE = "en"
@@ -154,7 +173,7 @@ CMS_PLACEHOLDER_CONF = {
 
 CMS_SOFTROOT = True
 CMS_MODERATOR = True
-CMS_PERMISSION = True
+##CMS_PERMISSION = True
 CMS_REDIRECTS = True
 CMS_SEO_FIELDS = True
 CMS_FLAT_URLS = False
@@ -163,6 +182,15 @@ CMS_HIDE_UNTRANSLATED = False
 CMS_URL_OVERWRITE = True
 
 SOUTH_TESTS_MIGRATE = False
+try:
+    import dbindexer
+    DATABASES['native'] = DATABASES['default']
+    DATABASES['default'] = {'ENGINE': 'dbindexer', 'TARGET': 'native'}
+    INSTALLED_APPS += ('dbindexer',)
+    MIDDLEWARE_CLASSES = ('dbindexer.middleware.DBIndexerMiddleware',) + \
+                         MIDDLEWARE_CLASSES
+except ImportError:
+    pass
 
 try:
     from local_settings import *
