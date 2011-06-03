@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 from cms.exceptions import NoHomeFound
 from cms.models.pagemodel import Page
 from cms.utils.moderator import get_page_queryset
+
 from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
@@ -113,5 +115,6 @@ def get_page_from_request(request, use_path=None):
         page = pages.filter(q).distinct().get()
     except Page.DoesNotExist:
         return None
+        
     request._current_page_cache = page
     return page

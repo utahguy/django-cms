@@ -1,10 +1,18 @@
+<<<<<<< HEAD
+=======
+# -*- coding: utf-8 -*-
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
 from cms.admin.forms import save_permissions
 from cms.models import Title, Page
 from cms.models.moderatormodels import ACCESS_PAGE_AND_DESCENDANTS
 from cms.models.permissionmodels import PagePermission, PageUser
 from cms.models.pluginmodel import CMSPlugin
 from cms.plugins.text.models import Text
+<<<<<<< HEAD
 from cms.test.util.context_managers import UserLoginContext
+=======
+from cms.test.util.context_managers import UserLoginContext, SettingsOverride
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
 from cms.utils.permissions import _thread_locals
 from django.conf import settings
 from django.contrib.auth.models import User, AnonymousUser
@@ -17,7 +25,10 @@ from django.template.defaultfilters import slugify
 from django.test.testcases import TestCase
 from menus.menu_pool import menu_pool
 from urlparse import urlparse
+<<<<<<< HEAD
 import copy
+=======
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
 import sys
 import urllib
 import warnings
@@ -30,6 +41,10 @@ URL_CMS_PAGE_DELETE = URL_CMS_PAGE_CHANGE + "delete/"
 URL_CMS_PLUGIN_ADD = URL_CMS_PAGE + "add-plugin/"
 URL_CMS_PLUGIN_EDIT = URL_CMS_PAGE + "edit-plugin/"
 URL_CMS_PLUGIN_REMOVE = URL_CMS_PAGE + "remove-plugin/"
+<<<<<<< HEAD
+=======
+URL_CMS_TRANSLATION_DELETE = URL_CMS_PAGE_CHANGE + "delete-translation/"
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
 
 class _Warning(object):
     def __init__(self, message, category, filename, lineno):
@@ -91,6 +106,18 @@ class CMSTestCase(TestCase):
         admin.set_password("admin")
         admin.save()
         return admin
+<<<<<<< HEAD
+=======
+        
+    def get_staff_user_with_no_permissions(self):
+        """
+        Used in security tests
+        """
+        staff = User(username="staff", is_staff=True, is_active=True)
+        staff.set_password("staff")
+        staff.save()
+        return staff
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
     
     def get_new_page_data(self, parent_id=''):
         page_data = {'title':'test page %d' % self.counter, 
@@ -108,10 +135,25 @@ class CMSTestCase(TestCase):
     def print_page_structure(self, title=None):
         """Just a helper to see the page struct.
         """
+<<<<<<< HEAD
         print "-------------------------- %s --------------------------------" % (title or "page structure")
         for page in Page.objects.drafts().order_by('tree_id', 'parent', 'lft'):
             print "%s%s #%d" % ("    " * (page.level), page, page.id)
     
+=======
+        for page in Page.objects.drafts().order_by('tree_id', 'lft'):
+            print "%s%s #%d" % ("    " * (page.level), page, page.id)
+    
+    def print_node_structure(self, nodes, *extra):
+        def _rec(nodes, level=0):
+            ident = level * '    '
+            for node in nodes:
+                raw_attrs = [(bit, getattr(node, bit, node.attr.get(bit, "unknown"))) for bit in extra]
+                attrs = ', '.join(['%s: %r' % data for data in raw_attrs])
+                print "%s%s: %s" % (ident, node.title, attrs)
+                _rec(node.children, level+1)
+        _rec(nodes)
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
     
     def assertObjectExist(self, qs, **filter):
         try:
@@ -128,14 +170,26 @@ class CMSTestCase(TestCase):
         raise self.failureException, "ObjectDoesNotExist not raised"
     
     def create_page(self, parent_page=None, user=None, position="last-child", 
+<<<<<<< HEAD
             title=None, site=1, published=False, in_navigation=False, moderate=False, **extra):
+=======
+            title=None, site=1, published=False, in_navigation=False,
+            moderate=False, language=None, title_extra=None, **extra):
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
         """
         Common way for page creation with some checks
         """
         _thread_locals.user = user
+<<<<<<< HEAD
         language = settings.LANGUAGES[0][0]
         if settings.CMS_SITE_LANGUAGES.get(site, False):
             language = settings.CMS_SITE_LANGUAGES[site][0]
+=======
+        if not language:
+            language = settings.LANGUAGES[0][0]
+            if settings.CMS_SITE_LANGUAGES.get(site, False):
+                language = settings.CMS_SITE_LANGUAGES[site][0]
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
         site = Site.objects.get(pk=site)
         
         page_data = {
@@ -149,11 +203,20 @@ class CMSTestCase(TestCase):
             page_data['changed_by'] = user
         if parent_page:
             page_data['parent'] = parent_page
+<<<<<<< HEAD
         page_data.update(**extra)
 
         page = Page.objects.create(**page_data)
         if parent_page:
             page.move_to(parent_page, position)
+=======
+        page_data.update(extra)
+
+        page = Page(**page_data)
+        if parent_page:
+            page.insert_at(self.reload(parent_page), position)
+        page.save()
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
 
         if settings.CMS_MODERATOR and user:
             page.pagemoderator_set.create(user=user)
@@ -164,7 +227,19 @@ class CMSTestCase(TestCase):
         else:
             slug = slugify(title)
         self.counter = self.counter + 1
+<<<<<<< HEAD
         self.create_title(title=title, slug=slug, language=language, page=page)
+=======
+        if not title_extra:
+            title_extra = {}
+        self.create_title(
+            title=title,
+            slug=slug,
+            language=language,
+            page=page,
+            **title_extra
+        )
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
             
         del _thread_locals.user
         return page
@@ -225,7 +300,11 @@ class CMSTestCase(TestCase):
         
         return Context(context)   
         
+<<<<<<< HEAD
     def get_request(self, path=None):
+=======
+    def get_request(self, path=None, language=settings.LANGUAGES[0][0]):
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
         if not path:
             path = self.get_pages_root()
         
@@ -251,11 +330,19 @@ class CMSTestCase(TestCase):
             'wsgi.multiprocess': True,
             'wsgi.multithread':  False,
             'wsgi.run_once':     False,
+<<<<<<< HEAD
+=======
+            'wsgi.input':        ''
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
         }
         request = WSGIRequest(environ)
         request.session = self.client.session
         request.user = getattr(self, 'user', AnonymousUser())
+<<<<<<< HEAD
         request.LANGUAGE_CODE = settings.LANGUAGES[0][0]
+=======
+        request.LANGUAGE_CODE = language
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
         return request
     
     def create_page_user(self, username, password=None, 
@@ -447,3 +534,25 @@ class CMSTestCase(TestCase):
 
         return result
     assertWarns = failUnlessWarns
+<<<<<<< HEAD
+=======
+
+
+class SettingsOverrideTestCase(CMSTestCase):
+    settings_overrides = {}
+    
+    def _pre_setup(self):
+        self._enter_settings_override()
+        super(SettingsOverrideTestCase, self)._pre_setup()
+        
+    def _enter_settings_override(self):
+        self._settings_ctx_manager = SettingsOverride(**self.settings_overrides)
+        self._settings_ctx_manager.__enter__()
+        
+    def _post_teardown(self):
+        super(SettingsOverrideTestCase, self)._post_teardown()
+        self._exit_settings_override()
+        
+    def _exit_settings_override(self):
+        self._settings_ctx_manager.__exit__(None, None, None)
+>>>>>>> c3880b654ec8afcc4caa1decf28a56098015607a
