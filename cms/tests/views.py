@@ -1,7 +1,8 @@
 from __future__ import with_statement
+from cms.api import create_page
 from cms.apphook_pool import apphook_pool
-from cms.test.testcases import SettingsOverrideTestCase
-from cms.test.util.context_managers import SettingsOverride
+from cms.test_utils.testcases import SettingsOverrideTestCase
+from cms.test_utils.util.context_managers import SettingsOverride
 from cms.views import _handle_no_page, details
 from django.conf import settings
 from django.core.urlresolvers import clear_url_caches
@@ -10,17 +11,17 @@ import sys
 
 
 APP_NAME = 'SampleApp'
-APP_MODULE = "testapp.sampleapp.cms_app"
+APP_MODULE = "project.sampleapp.cms_app"
 
 
 class ViewTests(SettingsOverrideTestCase):
-    urls = 'testapp.urls_for_apphook_tests'
+    urls = 'project.urls_for_apphook_tests'
     settings_overrides = {'CMS_MODERATOR': False}
     
     def setUp(self):
         clear_url_caches()
     
-    def test_01_handle_no_page(self):
+    def test_handle_no_page(self):
         """
         Test handle nopage correctly works with DEBUG=True
         """
@@ -33,11 +34,11 @@ class ViewTests(SettingsOverrideTestCase):
             response = _handle_no_page(request, slug)
             self.assertEqual(response.status_code, 200)
             
-    def test_02_language_fallback(self):
+    def test_language_fallback(self):
         """
         Test language fallbacks in details view
         """
-        self.create_page(published=True, language='en')
+        create_page("page", "nav_playground.html", "en", published=True)
         request = self.get_request('/', 'de')
         response = details(request, '')
         self.assertEqual(response.status_code, 302)
@@ -45,7 +46,7 @@ class ViewTests(SettingsOverrideTestCase):
         with SettingsOverride(CMS_LANGUAGE_FALLBACK=False):
             self.assertRaises(Http404, details, request, '')
     
-    def test_03_apphook_not_hooked(self):
+    def test_apphook_not_hooked(self):
         """
         Test details view when apphook pool has apphooks, but they're not
         actually hooked
@@ -55,23 +56,20 @@ class ViewTests(SettingsOverrideTestCase):
         apphooks = (
             '%s.%s' % (APP_MODULE, APP_NAME),
         )
-        self.create_page(published=True, language='en')
+        create_page("page2", "nav_playground.html", "en", published=True)
         with SettingsOverride(CMS_APPHOOKS=apphooks):
             apphook_pool.clear()
             response = self.client.get('/')
             self.assertEqual(response.status_code, 200)
             apphook_pool.clear()
     
-    def test_04_redirect(self):
+    def test_redirect(self):
         redirect_one = 'https://www.django-cms.org/'
         redirect_two = '/'
         redirect_three = '/en/'
         # test external redirect
-        one = self.create_page(
-            published=True,
-            language='en',
-            title_extra={'redirect': redirect_one}
-        )
+        one = create_page("one", "nav_playground.html", "en", published=True,
+                          redirect=redirect_one)
         url = one.get_absolute_url()
         request = self.get_request(url)
         response = details(request, url.strip('/'))
@@ -79,12 +77,8 @@ class ViewTests(SettingsOverrideTestCase):
         self.assertEqual(response['Location'], redirect_one)
         
         # test internal language neutral redirect
-        two = self.create_page(
-            parent_page=one,
-            published=True,
-            language='en',
-            title_extra={'redirect': redirect_two}
-        )
+        two = create_page("two", "nav_playground.html", "en", parent=one,
+                          published=True, redirect=redirect_two)
         url = two.get_absolute_url()
         request = self.get_request(url)
         response = details(request, url.strip('/'))
@@ -92,24 +86,17 @@ class ViewTests(SettingsOverrideTestCase):
         self.assertEqual(response['Location'], '/en/')
         
         # test internal forced language redirect
-        three = self.create_page(
-            parent_page=one,
-            published=True,
-            language='en',
-            title_extra={'redirect': redirect_three}
-        )
+        three = create_page("three", "nav_playground.html", "en", parent=one,
+                            published=True, redirect=redirect_three)
         url = three.get_absolute_url()
         request = self.get_request(url)
         response = details(request, url.strip('/'))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], redirect_three)
     
-    def test_05_login_required(self):
-        self.create_page(
-            published=True,
-            language='en',
-            login_required=True,
-        )
+    def test_login_required(self):
+        create_page("page", "nav_playground.html", "en", published=True,
+                         login_required=True)
         request = self.get_request('/')
         response = details(request, '')
         self.assertEqual(response.status_code, 302)

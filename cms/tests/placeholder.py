@@ -1,20 +1,26 @@
 # -*- coding: utf-8 -*-
 from __future__ import with_statement
+from cms.api import add_plugin
 from cms.exceptions import DuplicatePlaceholderWarning
 from cms.models.placeholdermodel import Placeholder
-from cms.test.testcases import CMSTestCase
-from cms.test.util.context_managers import SettingsOverride, UserLoginContext
+from cms.plugin_rendering import render_placeholder
+from cms.test_utils.testcases import CMSTestCase
+from cms.test_utils.util.context_managers import (SettingsOverride, 
+    UserLoginContext)
+from cms.test_utils.util.mock import AttributeObject
 from cms.utils.placeholder import PlaceholderNoAction, MLNGPlaceholderActions
 from cms.utils.plugins import get_placeholders
+from cms.api import add_plugin
+from cms.plugins.text.cms_plugins import TextPlugin
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
 from django.template import TemplateSyntaxError, Template
 from django.template.context import Context, RequestContext
-from testapp.fakemlng.models import Translations, Translations
-from testapp.placeholderapp.models import (Example1, Example2, Example3, Example4, 
-    Example5, Example1, Example2, Example3, Example4, Example5)
+from project.fakemlng.models import Translations
+from project.placeholderapp.models import (Example1, Example2, Example3, Example4, 
+    Example5)
 
 
 class PlaceholderTestCase(CMSTestCase):
@@ -23,41 +29,45 @@ class PlaceholderTestCase(CMSTestCase):
         u.set_password("test")
         u.save()
         
-        self.login_user(u)
+        self._login_context = self.login_user_context(u)
+        self._login_context.__enter__()
+    
+    def tearDown(self):
+        self._login_context.__exit__(None, None, None)
         
-    def test_01_placeholder_scanning_extend(self):
+    def test_placeholder_scanning_extend(self):
         placeholders = get_placeholders('placeholder_tests/test_one.html')
         self.assertEqual(sorted(placeholders), sorted([u'new_one', u'two', u'three']))
         
-    def test_02_placeholder_scanning_include(self):
+    def test_placeholder_scanning_include(self):
         placeholders = get_placeholders('placeholder_tests/test_two.html')
         self.assertEqual(sorted(placeholders), sorted([u'child', u'three']))
         
-    def test_03_placeholder_scanning_double_extend(self):
+    def test_placeholder_scanning_double_extend(self):
         placeholders = get_placeholders('placeholder_tests/test_three.html')
         self.assertEqual(sorted(placeholders), sorted([u'new_one', u'two', u'new_three']))
         
-    def test_04_placeholder_scanning_complex(self):
+    def test_placeholder_scanning_complex(self):
         placeholders = get_placeholders('placeholder_tests/test_four.html')
         self.assertEqual(sorted(placeholders), sorted([u'new_one', u'child', u'four']))
         
-    def test_05_placeholder_scanning_super(self):
+    def test_placeholder_scanning_super(self):
         placeholders = get_placeholders('placeholder_tests/test_five.html')
         self.assertEqual(sorted(placeholders), sorted([u'one', u'extra_one', u'two', u'three']))
         
-    def test_06_placeholder_scanning_nested(self):
+    def test_placeholder_scanning_nested(self):
         placeholders = get_placeholders('placeholder_tests/test_six.html')
         self.assertEqual(sorted(placeholders), sorted([u'new_one', u'new_two', u'new_three']))
         
-    def test_07_placeholder_scanning_duplicate(self):
+    def test_placeholder_scanning_duplicate(self):
         placeholders = self.assertWarns(DuplicatePlaceholderWarning, "Duplicate placeholder found: `one`", get_placeholders, 'placeholder_tests/test_seven.html')
         self.assertEqual(sorted(placeholders), sorted([u'one']))
 
-    def test_08_placeholder_scanning_extend_outside_block(self):
+    def test_placeholder_scanning_extend_outside_block(self):
         placeholders = get_placeholders('placeholder_tests/outside.html')
         self.assertEqual(sorted(placeholders), sorted([u'new_one', u'two', u'base_outside']))
     
-    def test_09_fieldsets_requests(self):
+    def test_fieldsets_requests(self):
         response = self.client.get(reverse('admin:placeholderapp_example1_add'))
         self.assertEqual(response.status_code, 200)
         response = self.client.get(reverse('admin:placeholderapp_example2_add'))
@@ -69,7 +79,7 @@ class PlaceholderTestCase(CMSTestCase):
         response = self.client.get(reverse('admin:placeholderapp_example5_add'))
         self.assertEqual(response.status_code, 200)
         
-    def test_10_fieldsets(self):
+    def test_fieldsets(self):
         request = self.get_request('/')
         admins = [
             (Example1, 2),
@@ -98,10 +108,10 @@ class PlaceholderTestCase(CMSTestCase):
                         phfields.remove(field)
             self.assertEqual(phfields, [])
 
-    def test_11_placeholder_scanning_fail(self):
+    def test_placeholder_scanning_fail(self):
         self.assertRaises(TemplateSyntaxError, get_placeholders, 'placeholder_tests/test_eleven.html')
 
-    def test_12_placeholder_tag(self):
+    def test_placeholder_tag(self):
         template = Template("{% load placeholder_tags %}{% render_placeholder placeholder %}")
         ctx = Context()
         self.assertEqual(template.render(ctx), "")
@@ -112,23 +122,40 @@ class PlaceholderTestCase(CMSTestCase):
         rctx['placeholder'] = placeholder
         self.assertEqual(template.render(rctx), "")
         self.assertEqual(placeholder.cmsplugin_set.count(), 0)
-        self.add_plugin(placeholder=placeholder, body="test", language=settings.LANGUAGES[0][0])
+        add_plugin(placeholder, "TextPlugin", settings.LANGUAGES[0][0], body="test")
         self.assertEqual(placeholder.cmsplugin_set.count(), 1)
         rctx = RequestContext(request)
         placeholder = self.reload(placeholder)
         rctx['placeholder'] = placeholder
         self.assertEqual(template.render(rctx).strip(), "test")
+    
+    def test_placeholder_context_leaking(self):
+        TEST_CONF = {'test': {'extra_context': {'width': 10}}}
+        ph = Placeholder.objects.create(slot='test')
+        class NoPushPopContext(Context):
+            def push(self):
+                pass
+            pop = push
+        context = NoPushPopContext()
+        context['request'] = self.get_request()
+        with SettingsOverride(CMS_PLACEHOLDER_CONF=TEST_CONF):
+            render_placeholder(ph, context)
+            self.assertTrue('width' in context)
+            self.assertEqual(context['width'], 10)
+            ph.render(context, None)
+            self.assertTrue('width' in context)
+            self.assertEqual(context['width'], 10)
 
 
 class PlaceholderActionTests(CMSTestCase):
     fixtures = ['fakemlng.json']
     
-    def test_01_placeholder_no_action(self):
+    def test_placeholder_no_action(self):
         actions = PlaceholderNoAction()
         self.assertEqual(actions.get_copy_languages(), [])
         self.assertFalse(actions.copy())
         
-    def test_02_mlng_placeholder_actions_get_copy_languages(self):
+    def test_mlng_placeholder_actions_get_copy_languages(self):
         actions = MLNGPlaceholderActions()
         fr = Translations.objects.get(language_code='fr')
         de = Translations.objects.get(language_code='de')
@@ -149,7 +176,7 @@ class PlaceholderActionTests(CMSTestCase):
         self.assertEqual(de_copy_languages, [EN, FR])
         self.assertEqual(en_copy_languages, [FR])
         
-    def test_03_mlng_placeholder_actions_copy(self):
+    def test_mlng_placeholder_actions_copy(self):
         actions = MLNGPlaceholderActions()
         fr = Translations.objects.get(language_code='fr')
         de = Translations.objects.get(language_code='de')
@@ -165,7 +192,7 @@ class PlaceholderActionTests(CMSTestCase):
         self.assertEqual(fr.placeholder.cmsplugin_set.count(), 1)
         self.assertEqual(de.placeholder.cmsplugin_set.count(), 1)
         
-    def test_04_mlng_placeholder_actions_empty_copy(self):
+    def test_mlng_placeholder_actions_empty_copy(self):
         actions = MLNGPlaceholderActions()
         fr = Translations.objects.get(language_code='fr')
         de = Translations.objects.get(language_code='de')
@@ -181,7 +208,7 @@ class PlaceholderActionTests(CMSTestCase):
         self.assertEqual(fr.placeholder.cmsplugin_set.count(), 1)
         self.assertEqual(de.placeholder.cmsplugin_set.count(), 0)
         
-    def test_05_mlng_placeholder_actions_no_placeholder(self):
+    def test_mlng_placeholder_actions_no_placeholder(self):
         actions = MLNGPlaceholderActions()
         nl = Translations.objects.get(language_code='nl')
         de = Translations.objects.get(language_code='de')
@@ -198,44 +225,73 @@ class PlaceholderActionTests(CMSTestCase):
         de = Translations.objects.get(language_code='de')
         
 class PlaceholderModelTests(CMSTestCase):
+    def get_mock_user(self, superuser):
+        return AttributeObject(
+            is_superuser=superuser,
+            has_perm=lambda string: False,
+        ) 
     
-    class MockUser():
-        def __init__(self,superuser=True):
-            self.is_superuser = superuser
-        def has_perm(self, string):
-            return False # always return false, for simplicity 
+    def get_mock_request(self, superuser=True):
+        return AttributeObject(
+            superuser=superuser,
+            user=self.get_mock_user(superuser)
+        )
     
-    class MockRequest():
-        def __init__(self, superuser=True):
-            self.superuser = superuser
-            self.user = PlaceholderModelTests.MockUser(self.superuser)
-    
-    def test_01_check_placeholder_permissions_ok_for_superuser(self):
+    def test_check_placeholder_permissions_ok_for_superuser(self):
         ph = Placeholder.objects.create(slot='test', default_width=300)
-        result = ph.has_change_permission(self.MockRequest())
+        result = ph.has_change_permission(self.get_mock_request(True))
         self.assertTrue(result)
         
-    def test_02_check_placeholder_permissions_nok_for_user(self):
+    def test_check_placeholder_permissions_nok_for_user(self):
         ph = Placeholder.objects.create(slot='test', default_width=300)
-        result = ph.has_change_permission(self.MockRequest(False))
+        result = ph.has_change_permission(self.get_mock_request(False))
         self.assertFalse(result)
     
-    def test_03_check_unicode_rendering(self):
+    def test_check_unicode_rendering(self):
         ph = Placeholder.objects.create(slot='test', default_width=300)
         result = unicode(ph)
         self.assertEqual(result,u'test')
     
-    def test_04_excercise_get_attached_model(self):
+    def test_excercise_get_attached_model(self):
         ph = Placeholder.objects.create(slot='test', default_width=300)
         result = ph._get_attached_model()
         self.assertEqual(result, None) # Simple PH - no model
         
-    def test_05_excercise_get_attached_field_name(self):
+    def test_excercise_get_attached_field_name(self):
         ph = Placeholder.objects.create(slot='test', default_width=300)
         result = ph._get_attached_field_name()
         self.assertEqual(result, None) # Simple PH - no field name
-
-
+    
+    def test_excercise_get_attached_models_notplugins(self):
+        ex = Example1(
+            char_1='one',
+            char_2='two',
+            char_3='tree',
+            char_4='four'
+        )
+        ex.save()
+        ph = ex.placeholder
+        result = list(ph._get_attached_models())
+        self.assertEqual(result, [Example1]) # Simple PH - Example1 model
+        add_plugin(ph, TextPlugin, 'en', body='en body')
+        result = list(ph._get_attached_models())
+        self.assertEqual(result, [Example1]) # Simple PH still one Example1 model
+        
+    def test_excercise_get_attached_fields_notplugins(self):
+        ex = Example1(
+            char_1='one',
+            char_2='two',
+            char_3='tree',
+            char_4='four',
+        )
+        ex.save()
+        ph = ex.placeholder
+        result = [f.name for f in list(ph._get_attached_fields())]
+        self.assertEqual(result, ['placeholder']) # Simple PH - placeholder field name
+        add_plugin(ph, TextPlugin, 'en', body='en body')
+        result = [f.name for f in list(ph._get_attached_fields())]
+        self.assertEqual(result, ['placeholder']) # Simple PH - still one placeholder field name
+        
 class PlaceholderAdminTest(CMSTestCase):
     placeholderconf = {'test': {
             'limits': {
@@ -260,7 +316,7 @@ class PlaceholderAdminTest(CMSTestCase):
         request.environ['METHOD'] = 'POST'
         return request
     
-    def test_01_test_global_limit(self):
+    def test_global_limit(self):
         placeholder = self.get_placeholder()
         admin = self.get_admin()
         data = {
@@ -280,7 +336,7 @@ class PlaceholderAdminTest(CMSTestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(response.content, "This placeholder already has the maximum number of plugins.")
 
-    def test_02_test_type_limit(self):
+    def test_type_limit(self):
         placeholder = self.get_placeholder()
         admin = self.get_admin()
         data = {
