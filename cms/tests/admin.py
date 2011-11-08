@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import with_statement
-from cms.admin.dialog.forms import ModeratorForm, PermissionForm, \
-    PermissionAndModeratorForm
-from cms.admin.dialog.views import _form_class_selector
-from cms.admin.pageadmin import contribute_fieldsets, contribute_list_filter, PageAdmin
 from cms.admin.change_list import CMSChangeList
+from cms.admin.dialog.forms import (ModeratorForm, PermissionForm, 
+    PermissionAndModeratorForm)
+from cms.admin.dialog.views import _form_class_selector
+from cms.admin.forms import PageForm
+from cms.admin.pageadmin import (contribute_fieldsets, contribute_list_filter, 
+    PageAdmin)
 from cms.api import create_page, create_title, add_plugin
 from cms.apphook_pool import apphook_pool, ApphookPool
 from cms.models.moderatormodels import PageModeratorState
@@ -14,25 +16,25 @@ from cms.models.placeholdermodel import Placeholder
 from cms.models.titlemodels import Title
 from cms.plugins.text.models import Text
 from cms.test_utils import testcases as base
-from cms.test_utils.util.request_factory import RequestFactory
 from cms.test_utils.testcases import (CMSTestCase, URL_CMS_PAGE_DELETE, 
     URL_CMS_PAGE, URL_CMS_TRANSLATION_DELETE)
-
 from cms.test_utils.util.context_managers import SettingsOverride
 from cms.test_utils.util.mock import AttributeObject
+from cms.test_utils.util.request_factory import RequestFactory
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.sites import site
-from django.contrib.auth.models import User, Permission
+from django.contrib.auth.models import User, Permission, AnonymousUser
 from django.contrib.sites.models import Site
 from django.core.exceptions import PermissionDenied
 from django.core.urlresolvers import reverse
-from django.http import Http404, HttpResponseBadRequest, HttpResponseForbidden, \
-    HttpResponse
+from django.http import (Http404, HttpResponseBadRequest, HttpResponseForbidden, 
+    HttpResponse)
 from django.test.client import Client
 from menus.menu_pool import menu_pool
 from types import MethodType
 from unittest import TestCase
+
 
 class AdminTestsBase(CMSTestCase):
     
@@ -156,6 +158,91 @@ class AdminTestCase(AdminTestsBase):
             self.assertEqual(page.reverse_id, REVERSE_ID)
             title = page.get_title_obj()
             self.assertEqual(title.overwrite_url, None)
+            
+    def test_edit_does_not_reset_apphook(self):
+        """
+        Makes sure that if a non-superuser with no rights to edit advanced page
+        fields edits a page, those advanced fields are not touched.
+        """
+        OLD_PAGE_NAME = 'Test Page'
+        NEW_PAGE_NAME = 'Test page 2'
+        REVERSE_ID = 'Test'
+        APPLICATION_URLS = 'project.sampleapp.urls'
+        
+        admin, normal_guy = self._get_guys()
+        
+        site = Site.objects.get(pk=1)
+    
+        # The admin creates the page
+        page = create_page(OLD_PAGE_NAME, "nav_playground.html", "en",
+                           site=site, created_by=admin)
+        page.reverse_id = REVERSE_ID
+        page.save()
+        title = page.get_title_obj()
+        title.has_url_overwrite = True
+        title.application_urls = APPLICATION_URLS
+        title.save()
+        
+        self.assertEqual(page.get_title(), OLD_PAGE_NAME)
+        self.assertEqual(page.reverse_id, REVERSE_ID)
+        self.assertEqual(title.application_urls, APPLICATION_URLS)
+        
+        # The user edits the page (change the page name for ex.)
+        page_data = {
+            'title': NEW_PAGE_NAME, 
+            'slug': page.get_slug(), 
+            'language': title.language,
+            'site': page.site.pk, 
+            'template': page.template,
+        }
+        # required only if user haves can_change_permission
+        page_data['pagepermission_set-TOTAL_FORMS'] = 0
+        page_data['pagepermission_set-INITIAL_FORMS'] = 0
+        page_data['pagepermission_set-MAX_NUM_FORMS'] = 0
+        page_data['pagepermission_set-2-TOTAL_FORMS'] = 0
+        page_data['pagepermission_set-2-INITIAL_FORMS'] = 0
+        page_data['pagepermission_set-2-MAX_NUM_FORMS'] = 0
+        
+        with self.login_user_context(normal_guy):
+            resp = self.client.post(base.URL_CMS_PAGE_CHANGE % page.pk, page_data, 
+                                    follow=True)
+            self.assertEqual(resp.status_code, 200)
+            self.assertTemplateNotUsed(resp, 'admin/login.html')
+            page = Page.objects.get(pk=page.pk)
+            
+            self.assertEqual(page.get_title(), NEW_PAGE_NAME)
+            self.assertEqual(page.reverse_id, REVERSE_ID)
+            title = page.get_title_obj()
+            self.assertEqual(title.application_urls, APPLICATION_URLS)
+            
+            # The admin edits the page (change the page name for ex.)
+            page_data = {
+                'title': OLD_PAGE_NAME, 
+                'slug': page.get_slug(), 
+                'language': title.language,
+                'site': page.site.pk, 
+                'template': page.template,
+                'reverse_id': page.reverse_id,
+            }
+            # required only if user haves can_change_permission
+            page_data['pagepermission_set-TOTAL_FORMS'] = 0
+            page_data['pagepermission_set-INITIAL_FORMS'] = 0
+            page_data['pagepermission_set-MAX_NUM_FORMS'] = 0
+            page_data['pagepermission_set-2-TOTAL_FORMS'] = 0
+            page_data['pagepermission_set-2-INITIAL_FORMS'] = 0
+            page_data['pagepermission_set-2-MAX_NUM_FORMS'] = 0
+        
+        with self.login_user_context(admin):
+            resp = self.client.post(base.URL_CMS_PAGE_CHANGE % page.pk, page_data, 
+                                    follow=True)
+            self.assertEqual(resp.status_code, 200)
+            self.assertTemplateNotUsed(resp, 'admin/login.html')
+            page = Page.objects.get(pk=page.pk)
+            
+            self.assertEqual(page.get_title(), OLD_PAGE_NAME)
+            self.assertEqual(page.reverse_id, REVERSE_ID)
+            title = page.get_title_obj()
+            self.assertEqual(title.application_urls, '')
 
     def test_delete(self):
         admin = self._get_guys(True)
@@ -406,6 +493,7 @@ class AdminFieldsetTests(TestCase):
             return True
         def func_false(self):
             return False
+        old_get_apphooks = apphook_pool.get_apphooks
         apphook_pool.get_apphooks = MethodType(func_true, apphook_pool, ApphookPool)
         control = AttributeObject()
         contribute_fieldsets(control)
@@ -415,6 +503,7 @@ class AdminFieldsetTests(TestCase):
         self.validate_attributes(control, experiment, ['fieldsets', 'advanced_fields'])
         self.assertTrue('application_urls' in control.advanced_fields, control.advanced_fields)
         self.assertFalse('application_urls' in experiment.advanced_fields, control.advanced_fields)
+        apphook_pool.get_apphooks = old_get_apphooks
         
 
 class AdminListFilterTests(TestCase):
@@ -850,3 +939,31 @@ class PluginPermissionTests(AdminTestsBase):
         self._give_permission(normal_guy, Text, 'add')
         response = client.post(url, data)
         self.assertEqual(response.status_code, HttpResponse.status_code)
+
+
+class AdminFormsTests(TestCase):
+    def test_clean_overwrite_url(self):
+        user = AnonymousUser()
+        user.is_superuser = True
+        user.pk = 1
+        request = type('Request', (object,), {'user': user})
+        with SettingsOverride(CMS_MODERATOR=False):
+            data = {
+                'title': 'TestPage',
+                'slug': 'test-page',
+                'language': 'en',
+                'overwrite_url': '/overwrite/url/',
+                'site': Site.objects.get_current().pk,  
+                'template': settings.CMS_TEMPLATES[0][0],
+                'published': True
+            }
+            
+            form = PageForm(data)
+            self.assertTrue(form.is_valid(), form.errors.as_text())
+            # WTF? WHY DOES form.save() not handle this stuff???
+            instance = form.save()
+            instance.permission_user_cache = user
+            instance.permission_advanced_settings_cache = True
+            Title.objects.set_or_create(request, instance, form, 'en')
+            form = PageForm(data, instance=instance)
+            self.assertTrue(form.is_valid(), form.errors.as_text())

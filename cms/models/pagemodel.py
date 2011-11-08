@@ -1,31 +1,30 @@
 # -*- coding: utf-8 -*-
-import copy
-from datetime import datetime
-from os.path import join
-
-from django.conf import settings
-from django.contrib.sites.models import Site
-from django.core.exceptions import ObjectDoesNotExist
-from django.core.urlresolvers import reverse
-from django.db import models, transaction
-from django.db.models import Q
-from django.db.models.fields.related import OneToOneRel
-from django.shortcuts import get_object_or_404
-from django.utils.translation import get_language, ugettext_lazy as _
-
 from cms.exceptions import NoHomeFound
 from cms.models.managers import PageManager, PagePermissionsPermissionManager
 from cms.models.metaclasses import PageMetaClass
 from cms.models.placeholdermodel import Placeholder
 from cms.models.pluginmodel import CMSPlugin
-
 from cms.publisher.errors import MpttPublisherCantPublish
+from cms.utils import i18n, urlutils, page as page_utils
 from cms.utils.copy_plugins import copy_plugins_to
 from cms.utils.helpers import reversion_register
-from cms.utils import i18n, urlutils, page as page_utils
-
+from datetime import datetime
+from django.conf import settings
+from django.contrib.sites.models import Site
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.urlresolvers import reverse
+from django.db import models
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from django.utils.translation import get_language, ugettext_lazy as _
 from menus.menu_pool import menu_pool
 from mptt.models import MPTTModel
+from os.path import join
+import copy
+
+
+
+
 
 
 class Page(MPTTModel):
@@ -117,6 +116,16 @@ class Page(MPTTModel):
         if title is None:
             title = u""
         return u'%s' % (title,)
+
+    def get_absolute_url(self, language=None, fallback=True):
+        if self.is_home():
+            return reverse('pages-root')
+        if settings.CMS_FLAT_URLS:
+            path = self.get_slug(language, fallback)
+            return urlutils.urljoin(reverse('pages-root'), path)
+        # else
+        path = self.get_path(language, fallback)
+        return urlutils.urljoin(reverse('pages-root'), path)
     
     def move_page(self, target, position='first-child'):
         """Called from admin interface when page is moved. Should be used on
@@ -298,7 +307,6 @@ class Page(MPTTModel):
         
         # Published pages should always have a publication date
         publish_directly, under_moderation = False, False
-        
         if self.publisher_is_draft:
             # publisher specific stuff, but only on draft model, this is here 
             # because page initializes publish process
@@ -357,11 +365,6 @@ class Page(MPTTModel):
                 if commit and publish_directly:
                     
                     self.publish()
-                    
-            elif self.publisher_public and self.publisher_public.published:
-                self.publisher_public.published = False
-                self.publisher_public.save()
-                
                 
     def save_base(self, *args, **kwargs):
         """Overriden save_base. If an instance is draft, and was changed, mark
@@ -381,14 +384,11 @@ class Page(MPTTModel):
         ret = super(Page, self).save_base(*args, **kwargs)
         return ret
 
-    @transaction.commit_manually
     def publish(self):
         """Overrides Publisher method, because there may be some descendants, which
         are waiting for parent to publish, so publish them if possible. 
 
         IMPORTANT: @See utils.moderator.approve_page for publishing permissions
-                   Also added @transaction.commit_manually decorator as delete() 
-                    was removing both draft and public versions
 
         Returns: True if page was successfully published.
         """
@@ -403,21 +403,18 @@ class Page(MPTTModel):
             self.save()
 
         if self._publisher_can_publish():
-
             ########################################################################
-            # delete the existing public page using transaction block to ensure save() and delete() do not conflict
-            # the draft version was being deleted if I replaced the save() below with a delete()
-            try:
-                old_public = self.get_public_object()
+            # Assign the existing public page in old_public and mark it as
+            # PUBLISHER_STATE_DELETE
+            # the draft version was being deleted if I replaced the save()
+            # below with a delete() directly so the deletion is handle at the end
+            old_public = self.get_public_object()
+            if old_public:
                 old_public.publisher_state = self.PUBLISHER_STATE_DELETE
                 # store old public on self, pass around instead
                 self.old_public = old_public
                 old_public.publisher_public = None  # remove the reference to the publisher_draft version of the page so it does not get deleted
                 old_public.save()
-            except:
-                transaction.rollback()
-            else:
-                transaction.commit()
 
             # we hook into the modified copy_page routing to do the heavy lifting of copying the draft page to a new public page
             new_public = self.copy_page(target=None, site=self.site,
@@ -436,16 +433,15 @@ class Page(MPTTModel):
             self.publisher_public = new_public
             self.moderator_state = Page.MODERATOR_APPROVED
             self.publisher_state = self.PUBLISHER_STATE_DEFAULT
-            self._publisher_keep_state = True        
+            self._publisher_keep_state = True
             published = True
         else:
             self.moderator_state = Page.MODERATOR_APPROVED_WAITING_FOR_PARENTS
 
         self.save(change_state=False)
-        
+
         if not published:
             # was not published, escape
-            transaction.commit()
             return
 
         # clean moderation log
@@ -458,15 +454,12 @@ class Page(MPTTModel):
             for child_page in old_public.children.order_by('lft'):
                 child_page.move_to(new_public, 'last-child')
                 child_page.save(change_state=False)
-            transaction.commit()
             # reload old_public to get correct tree attrs
             old_public = Page.objects.get(pk=old_public.pk)
             old_public.move_to(None, 'last-child')
             # moving the object out of the way berore deleting works, but why?
-            # finally delete the old public page    
+            # finally delete the old public page
             old_public.delete()
-        # manually commit the last transaction batch
-        transaction.commit()
 
         # page was published, check if there are some childs, which are waiting
         # for publishing (because of the parent)
@@ -480,9 +473,9 @@ class Page(MPTTModel):
         # fire signal after publishing is done
         import cms.signals as cms_signals
         cms_signals.post_publish.send(sender=Page, instance=self)
-        transaction.commit()
+
         return published
-        
+
     def delete(self):
         """Mark public instance for deletion and delete draft.
         """
@@ -531,37 +524,6 @@ class Page(MPTTModel):
             self.all_languages = list(self.all_languages)
             self.all_languages.sort()    
         return self.all_languages
-
-    def get_absolute_url(self, language=None, fallback=True):
-        try:
-            if self.is_home():
-                return reverse('pages-root')
-        except NoHomeFound:
-            pass
-        if settings.CMS_FLAT_URLS:
-            path = self.get_slug(language, fallback)
-        else:
-            path = self.get_path(language, fallback)
-            if hasattr(self, "home_cut_cache") and self.home_cut_cache:
-                if not self.get_title_obj_attribute("has_url_overwrite", language, fallback) and path:
-                    path = "/".join(path.split("/")[1:])
-            else:    
-                home_pk = None
-                try:
-                    home_pk = self.home_pk_cache
-                except NoHomeFound:
-                    pass
-                """
-                this is pain slow! the code fetches all ancestors for all pages
-                and then checks if the root node is a home_pk, if yes, it cuts off the first path part.
-                """
-                ancestors = self.get_cached_ancestors(ascending=True)
-                # sometimes there are no ancestors
-                if len(ancestors) != 0:
-                    if self.parent_id and ancestors[-1].pk == home_pk and not self.get_title_obj_attribute("has_url_overwrite", language, fallback) and path:
-                        path = "/".join(path.split("/")[1:])
-
-        return urlutils.urljoin(reverse('pages-root'), path)
     
     def get_cached_ancestors(self, ascending=True):
         if ascending:
@@ -731,15 +693,14 @@ class Page(MPTTModel):
         
         if request.user.is_authenticated():
             site = current_site(request)
+            global_perms_q = Q(can_view=True) & Q(
+                Q(sites__in=[site]) | Q(sites__isnull=True)
+            )
             global_view_perms = GlobalPagePermission.objects.with_user(
-                request.user).filter(can_view=True, sites__in=[site]).exists()
+                request.user).filter(global_perms_q).exists()
             # a global permission was given to the request's user
             if global_view_perms:
                 return True
-            # authenticated user, no restriction and public for all fallback
-            if (not is_restricted and not global_view_perms and
-                    not settings.CMS_PUBLIC_FOR == 'all'):
-                return False
             # authenticated user, no restriction and public for all
             if (not is_restricted and not global_view_perms and 
                 settings.CMS_PUBLIC_FOR == 'all'):
@@ -973,6 +934,15 @@ class Page(MPTTModel):
                 '%s__gt' % opts.left_attr: getattr(self, opts.right_attr),
             })
 
+        # publisher stuff
+        filters.update({
+            'publisher_is_draft': self.publisher_is_draft
+        })
+        # multisite
+        filters.update({
+            'site__id': self.site_id
+        })
+
         sibling = None
         try:
             sibling = self._tree_manager.filter(**filters)[0]
@@ -998,7 +968,16 @@ class Page(MPTTModel):
                 '%s__lt' % opts.right_attr: getattr(self, opts.left_attr),
             })
             order_by = '-%s' % opts.right_attr
-
+        
+        # publisher stuff
+        filters.update({
+            'publisher_is_draft': self.publisher_is_draft
+        })
+        # multisite
+        filters.update({
+            'site__id': self.site_id
+        })
+        
         sibling = None
         try:
             sibling = self._tree_manager.filter(**filters).order_by(order_by)[0]
@@ -1014,7 +993,7 @@ class Page(MPTTModel):
             obj - public variant of `self` to be saved.
 
         """
-        prev_sibling = self.get_previous_filtered_sibling(publisher_is_draft=True, publisher_public__isnull=False)
+        prev_sibling = self.get_previous_filtered_sibling(publisher_public__isnull=False)
 
         if not self.publisher_public_id:
             # is there anybody on left side?

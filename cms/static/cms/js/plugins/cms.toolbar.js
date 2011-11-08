@@ -1,7 +1,5 @@
 (function ($) {
 /**
- * @author:		Angelo Dini
- * @copyright:	http://www.divio.ch under the BSD Licence
  * @requires:	Classy, jQuery, jQuery.cookie
  */
 
@@ -19,6 +17,7 @@ jQuery(document).ready(function ($) {
 	 *	- CMS.API.Toolbar.registerItems(array);
 	 *	- CMS.API.Toolbar.removeItem(id);
 	 *	- CMS.API.Toolbar.registerType(function);
+	 *  - CMS.API.Toolbar.isToolbarHidden();
 	 * @compatibility: IE >= 6, FF >= 2, Safari >= 4, Chrome > =4, Opera >= 10
 	 * TODO: login needs special treatment (errors, login on enter)
 	 * TODO: styling of the collapser button needs to be somehow transparent
@@ -80,11 +79,16 @@ jQuery(document).ready(function ($) {
 			// apply csrf patch to toolbar from cms.base.js
 			this.csrf();
 
-			// the toolbar needs to resize depending on the window size on motherfucking ie6
+			// the toolbar needs to resize depending on the window size on ie6
 			if($.browser.msie && $.browser.version <= '6.0') {
 				$(window).bind('resize', function () { that.wrapper.css('width', $(window).width()); });
 				$(window).trigger('resize');
 			}
+		},
+		
+		// Checks whether the toolbar is hidden right now
+		isToolbarHidden: function(){
+			return this.toolbar.data('collapsed');
 		},
 
 		/**
@@ -197,7 +201,7 @@ jQuery(document).ready(function ($) {
 		// requires: type, order, dir, title, url
 		// optional: cls
 		_registerAnchor: function (obj) {
-			// take a copy of the template, append it, remove it, copy html... because jquery is stupid
+			// take a copy of the template, append it, remove it, copy html. required because of how jquery works.
 			var template = this._processTemplate('#cms_toolbar-item_anchor', obj);
 			// append item
 			this._injectItem(template, obj.dir, obj.order);
@@ -227,7 +231,7 @@ jQuery(document).ready(function ($) {
 		_registerSwitcher: function (obj) {
 			// save reference to this class
 			var that = this;
-			// take a copy of the template, append it, remove it, copy html... because jquery is stupid
+			// take a copy of the template, append it, remove it, copy html. required because of how jquery works.
 			var template = this._processTemplate('#cms_toolbar-item_switcher', obj);
 			// should btn be shown?
 			var btn = template.find('.cms_toolbar-item_switcher-link span');
@@ -269,7 +273,7 @@ jQuery(document).ready(function ($) {
 		// required: type, order, dir, redirect
 		// optional: cls, icon, action, hidden
 		_registerButton: function (obj) {
-			// take a copy of the template, append it, remove it, copy html... because jquery is stupid
+			// take a copy of the template, append it, remove it, copy html. required because of how jquery works.
 			var template = this._processTemplate('#cms_toolbar-item_button', obj);
 			// append item
 			this._injectItem(template, obj.dir, obj.order);
@@ -278,7 +282,7 @@ jQuery(document).ready(function ($) {
 		// required: type, order, dir, items (title, url, method (get/post), cls, icon)
 		// optional: cls, icon
 		_registerList: function (obj) {
-			// take a copy of the template, append it, remove it, copy html... because jquery is stupid
+			// take a copy of the template, append it, remove it, copy html. required because of how jquery works.
 			var template = this._processTemplate('#cms_toolbar-item_list', obj);
 
 			// item injection logic
@@ -289,13 +293,13 @@ jQuery(document).ready(function ($) {
 			// lets loop through the items
 			$(obj.items).each(function (index, value) {
 				// add icon if available
-				var icon = (value.icon !== '') ? 'cms_toolbar_icon cms_toolbar_icon-enabled ' : '';
+				var icon_styles = value.icon ? ' class="cms_toolbar_icon cms_toolbar_icon-enabled" style="background-image:url('+value.icon+');"' : '';
 				// replace attributes
 				tmp += list.replace('[list_title]', value.title)
 						   .replace('[list_url]', value.url)
 						   .replace('[list_method]', value.method)
 						   .replace('[list_class]', value.cls)
-						   .replace('<span>', '<span class="'+icon+'" style="background-image:url('+value.icon+');">');
+						   .replace('<span>', '<span'+icon_styles+'>');
 			});
 			// add items
 			template.find('.cms_toolbar-item_list').html($(tmp));
@@ -385,8 +389,7 @@ jQuery(document).ready(function ($) {
 			// back to jquery object
 			template = $(template);
 			if(obj.cls) template.addClass(obj.cls);
-			// TODO: backend should return '' or undefined instead of /media/
-			if(obj.icon && obj.icon !== '/media/') {
+			if (obj.icon) {
 				template.find('.cms_toolbar-btn_right .toolbar_icon-prefix')
 						.addClass('cms_toolbar_icon-enabled')
 						.css('background-image', 'url('+obj.icon+')');

@@ -16,7 +16,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
 import datetime
 import os.path
 
@@ -201,9 +201,9 @@ class PagesTestCase(CMSTestCase):
             page2 = Page.objects.all()[1]
             page3 = Page.objects.all()[2]
             # move pages
-            response = self.client.post("/admin/cms/page/%s/move-page/" % page3.pk, {"target":page2.pk, "position":"last-child" })
+            response = self.client.post("/admin/cms/page/%s/move-page/" % page3.pk, {"target": page2.pk, "position": "last-child"})
             self.assertEqual(response.status_code, 200)
-            response = self.client.post("/admin/cms/page/%s/move-page/" % page2.pk, {"target":page1.pk, "position":"last-child" })
+            response = self.client.post("/admin/cms/page/%s/move-page/" % page2.pk, {"target": page1.pk, "position": "last-child"})
             self.assertEqual(response.status_code, 200)
             # check page2 path and url
             page2 = Page.objects.get(pk=page2.pk)
@@ -214,17 +214,24 @@ class PagesTestCase(CMSTestCase):
             self.assertEqual(page3.get_path(), page_data1['slug']+"/"+page_data2['slug']+"/"+page_data3['slug'])
             self.assertEqual(page3.get_absolute_url(), self.get_pages_root()+page_data1['slug']+"/"+page_data2['slug']+"/"+page_data3['slug']+"/")
             # publish page 1 (becomes home)
-            page1 = Page.objects.all()[0]
-            page1.published = True
-            page1.save()
+            page1 = Page.objects.get(pk=page1.pk)
+            page1.publish()
+            public_page1 = page1.publisher_public
+            self.assertEqual(public_page1.get_path(), '')
             # check that page2 and page3 url have changed
             page2 = Page.objects.get(pk=page2.pk)
-            self.assertEqual(page2.get_absolute_url(), self.get_pages_root()+page_data2['slug']+"/")
+            page2.publish()
+            public_page2 = page2.publisher_public
+            self.assertEqual(public_page2.get_absolute_url(), self.get_pages_root()+page_data2['slug']+"/")
             page3 = Page.objects.get(pk=page3.pk)
-            self.assertEqual(page3.get_absolute_url(), self.get_pages_root()+page_data2['slug']+"/"+page_data3['slug']+"/")
+            page3.publish()
+            public_page3 = page3.publisher_public
+            self.assertEqual(public_page3.get_absolute_url(), self.get_pages_root()+page_data2['slug']+"/"+page_data3['slug']+"/")
             # move page2 back to root and check path of 2 and 3
-            response = self.client.post("/admin/cms/page/%s/move-page/" % page2.pk, {"target":page1.pk, "position":"left" })
+            response = self.client.post("/admin/cms/page/%s/move-page/" % page2.pk, {"target": page1.pk, "position": "right"})
             self.assertEqual(response.status_code, 200)
+            page1 = Page.objects.get(pk=page1.pk)
+            self.assertEqual(page1.get_path(), page_data1['slug'])
             page2 = Page.objects.get(pk=page2.pk)
             self.assertEqual(page2.get_path(), page_data2['slug'])
             page3 = Page.objects.get(pk=page3.pk)
@@ -498,7 +505,32 @@ class PagesTestCase(CMSTestCase):
         page3 = self.move_page(page3, page4)
         self.assertEqual(page3.get_absolute_url(),
             self.get_pages_root()+'test-page-4/test-page-3/')
+    
+    def test_home_slug_not_accessible(self):
+        with SettingsOverride(CMS_MODERATOR=False, CMS_PERMISSION=False):
+            page = create_page('page', 'nav_playground.html', 'en', published=True)
+            self.assertEqual(page.get_absolute_url('en'), '/')
+            resp = self.client.get('/en/')
+            self.assertEqual(resp.status_code, HttpResponse.status_code)
+            resp = self.client.get('/en/page/')
+            self.assertEqual(resp.status_code, HttpResponseNotFound.status_code)
 
+    def test_public_home_page_replaced(self):
+        """Test that publishing changes to the home page doesn't move the public version"""
+        home = create_page('home', 'nav_playground.html', 'en', published = True, slug = 'home')
+        self.assertEqual(Page.objects.drafts().get_home().get_slug(), 'home')
+        home.publish()
+        self.assertEqual(Page.objects.public().get_home().get_slug(), 'home')
+        other = create_page('other', 'nav_playground.html', 'en', published = True, slug = 'other')
+        other.publish()
+        self.assertEqual(Page.objects.drafts().get_home().get_slug(), 'home')
+        self.assertEqual(Page.objects.public().get_home().get_slug(), 'home')
+        home = Page.objects.get(pk = home.id)
+        home.in_navigation = True
+        home.save()
+        home.publish()
+        self.assertEqual(Page.objects.drafts().get_home().get_slug(), 'home')
+        self.assertEqual(Page.objects.public().get_home().get_slug(), 'home')
 
 class NoAdminPageTests(CMSTestCase):
     urls = 'project.noadmin_urls'
@@ -516,3 +548,27 @@ class NoAdminPageTests(CMSTestCase):
         request = self.get_request('/admin/')
         page = get_page_from_request(request)
         self.assertEqual(page, None)
+
+class PreviousFilteredSiblingsTests(CMSTestCase):
+    def test_with_publisher(self):
+        home = create_page('home', 'nav_playground.html', 'en', published=True)
+        home.publish()
+        other = create_page('other', 'nav_playground.html', 'en', published=True)
+        other.publish()
+        other = Page.objects.get(pk=other.pk)
+        home = Page.objects.get(pk=home.pk)
+        self.assertEqual(other.get_previous_filtered_sibling(), home)
+        self.assertEqual(home.get_previous_filtered_sibling(), None)
+        
+    def test_multisite(self):
+        firstsite = Site.objects.create(name='first', domain='first.com')
+        secondsite = Site.objects.create(name='second', domain='second.com')
+        home = create_page('home', 'nav_playground.html', 'en', published=True, site=firstsite)
+        home.publish()
+        other = create_page('other', 'nav_playground.html', 'en', published=True, site=secondsite)
+        other.publish()
+        other = Page.objects.get(pk=other.pk)
+        home = Page.objects.get(pk=home.pk)
+        self.assertEqual(other.get_previous_filtered_sibling(), None)
+        self.assertEqual(home.get_previous_filtered_sibling(), None)
+        

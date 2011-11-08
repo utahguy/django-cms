@@ -70,7 +70,7 @@ The get_nodes function should return a list of
 
 - parent_id=None
 
-  If this is a child of an other node give here the id of the parent.
+  If this is a child of another node give here the id of the parent.
 
 - parent_namespace=None
 
@@ -78,11 +78,17 @@ The get_nodes function should return a list of
   namespace. The namespace is the name of the class. In the above example that
   would be: "TestMenu"
 
-  - attr=None
+- attr=None
 
   A dictionary of additional attributes you may want to use in a modifier or
   in the template.
 
+- visible=True
+
+  Whether or not this menu item should be visible.
+
+Additionally, each :class:`NavigationNode` provides a number of methods, which are
+detailed in the :class:`NavigationNode <menus.base.NavigationNode>` API references.
 
 ************
 Attach Menus
@@ -181,9 +187,9 @@ under "Application". Save the page.
     If at some point you want to remove this apphook after deleting the cms_app.py
     there is a cms management command called uninstall apphooks
     that removes the specified apphook(s) from all pages by name.
-    eg. ``manage.py cmsmanage uninstall apphooks MyApphook``.
+    eg. ``manage.py cms uninstall apphooks MyApphook``.
     To find all names for uninstallable apphooks there is a command for this aswell
-    ``manage.py cmsmanage list apphooks``.
+    ``manage.py cms list apphooks``.
 
 If you attached the app to a page with the url ``/hello/world/`` and the app has
 a urls.py that looks like this::
@@ -199,9 +205,12 @@ The ``main_view`` should now be available at ``/hello/world/`` and the
 ``sample_view`` has the url ``/hello/world/sublevel/``.
 
 
-.. note:: All views that are attached like this must return a
-          :class:`~django.template.RequestContext` instance instead of the
-          default :class:`~django.template.Context` instance.
+.. note::
+
+    All views that are attached like this must return a
+    :class:`~django.template.RequestContext` instance instead of the
+    default :class:`~django.template.Context` instance.
+
 
 Language Namespaces
 -------------------
@@ -279,7 +288,13 @@ We would now create a menu out of these categories::
         def get_nodes(self, request):
             nodes = []
             for category in Category.objects.all().order_by("tree_id", "lft"):
-                nodes.append(NavigationNode(category.name, category.pk, category.parent_id))
+                node = NavigationNode(
+                    category.name,
+                    category.get_absolute_url(),
+                    category.pk,
+                    category.parent_id
+                )                
+                nodes.append(node)
             return nodes
 
     menu_pool.register_menu(CategoryMenu)
@@ -302,15 +317,15 @@ Navigation Modifiers
 
 Navigation Modifiers give your application access to navigation menus.
 
-A modifier can add nodes to a menu, change the properties of existing
-nodes, and even rearrange entire menus.
+A modifier can change the properties of existing nodes or rearrange entire
+menus.
 
 
 An example use-case
 -------------------
 
 A simple example: you have a news application that publishes pages
-independently of Django CMS. However, you would like to integrate the 
+independently of django CMS. However, you would like to integrate the
 application into the menu structure of your site, so that at appropriate 
 places a *News* node appears in the navigation menu.
 

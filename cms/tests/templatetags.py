@@ -47,6 +47,7 @@ class TemplatetagDatabaseTests(TwoPagesFixture, SettingsOverrideTestCase):
     def test_get_page_by_untyped_arg_none(self):
         control = self._getfirst()
         request = self.get_request('/')
+        request.current_page = control
         page = _get_page_by_untyped_arg(None, request, 1)
         self.assertEqual(page, control)
         
@@ -76,12 +77,19 @@ class TemplatetagDatabaseTests(TwoPagesFixture, SettingsOverrideTestCase):
             )
             self.assertEqual(len(mail.outbox), 0)
             
-    def test_get_page_by_untyped_arg_dict_fail_nodebug(self):
-        with SettingsOverride(DEBUG=False, MANAGERS=[("Jenkins", "tests@django-cms.org")]):
+    def test_get_page_by_untyped_arg_dict_fail_nodebug_do_email(self):
+        with SettingsOverride(SEND_BROKEN_LINK_EMAILS=True, DEBUG=False, MANAGERS=[("Jenkins", "tests@django-cms.org")]):
             request = self.get_request('/')
             page = _get_page_by_untyped_arg({'pk': 3}, request, 1)
             self.assertEqual(page, None)
             self.assertEqual(len(mail.outbox), 1)
+
+    def test_get_page_by_untyped_arg_dict_fail_nodebug_no_email(self):
+        with SettingsOverride(SEND_BROKEN_LINK_EMAILS=False, DEBUG=False, MANAGERS=[("Jenkins", "tests@django-cms.org")]):
+            request = self.get_request('/')
+            page = _get_page_by_untyped_arg({'pk': 3}, request, 1)
+            self.assertEqual(page, None)
+            self.assertEqual(len(mail.outbox), 0)
     
     def test_get_page_by_untyped_arg_fail(self):
         request = self.get_request('/')
